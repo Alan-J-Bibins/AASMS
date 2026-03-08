@@ -1,8 +1,105 @@
 {
   "version": 1,
-  "author": "Alan J Bibins",
+  "author": "Alan J. Bibbins & Sukruta Nadkarni",
   "editor": "wokwi",
-  "parts": [ { "type": "wokwi-arduino-uno", "id": "uno", "top": 0, "left": 0, "attrs": {} } ],
-  "connections": [],
-  "dependencies": {}
+  "parts": [
+    {
+      "type": "wokwi-arduino-uno",
+      "id": "uno",
+      "top": 250,
+      "left": 320,
+      "attrs": {}
+    },
+
+    { "type": "wokwi-bmp280",       "id": "bmp1",  "top": 20,  "left": 650, "attrs": {} },
+    { "type": "wokwi-mpu6050",      "id": "imu1",  "top": 180, "left": 650, "attrs": {} },
+    { "type": "wokwi-lcd1602",      "id": "lcd1",  "top": 20,  "left": -80, "attrs": { "pins": "i2c" } },
+    { "type": "wokwi-microsd-card", "id": "sd1",   "top": 420, "left": -80, "attrs": {} },
+    { "type": "wokwi-servo",        "id": "srv1",  "top": 20,  "left": 920, "attrs": {} },
+
+    { "type": "wokwi-led",      "id": "led_r", "top": 420, "left": 700, "attrs": { "color": "red"    } },
+    { "type": "wokwi-led",      "id": "led_y", "top": 470, "left": 700, "attrs": { "color": "yellow" } },
+    { "type": "wokwi-led",      "id": "led_g", "top": 520, "left": 700, "attrs": { "color": "green"  } },
+    { "type": "wokwi-buzzer",   "id": "buz1",  "top": 580, "left": 700, "attrs": {} },
+
+    { "type": "wokwi-resistor", "id": "rr",    "top": 420, "left": 640, "attrs": { "value": "220" } },
+    { "type": "wokwi-resistor", "id": "ry",    "top": 470, "left": 640, "attrs": { "value": "220" } },
+    { "type": "wokwi-resistor", "id": "rg",    "top": 520, "left": 640, "attrs": { "value": "220" } },
+
+    {
+      "type": "custom-chip",
+      "id": "gps1",
+      "top": 560,
+      "left": 200,
+      "attrs": {
+        "chip": "gps-neo6m",
+        "label": "NEO-6M GPS"
+      }
+    },
+    {
+      "type": "custom-chip",
+      "id": "lora1",
+      "top": 560,
+      "left": 500,
+      "attrs": {
+        "chip": "lora-sx1278",
+        "label": "SX1278 LoRa"
+      }
+    }
+  ],
+  "connections": [
+    ["uno:5V",     "bmp1:VCC",  "red",    []],
+    ["uno:GND.1",  "bmp1:GND",  "black",  []],
+    ["uno:A4",     "bmp1:SDA",  "green",  []],
+    ["uno:A5",     "bmp1:SCL",  "blue",   []],
+
+    ["uno:5V",     "imu1:VCC",  "red",    []],
+    ["uno:GND.2",  "imu1:GND",  "black",  []],
+    ["uno:A4",     "imu1:SDA",  "green",  []],
+    ["uno:A5",     "imu1:SCL",  "blue",   []],
+
+    ["uno:5V",     "lcd1:VCC",  "red",    []],
+    ["uno:GND.3",  "lcd1:GND",  "black",  []],
+    ["uno:A4",     "lcd1:SDA",  "green",  []],
+    ["uno:A5",     "lcd1:SCL",  "blue",   []],
+
+    ["uno:5V",     "sd1:VCC",   "red",    []],
+    ["uno:GND.4",  "sd1:GND",   "black",  []],
+    ["uno:10",     "sd1:CS",    "purple", []],
+    ["uno:11",     "sd1:MOSI",  "blue",   []],
+    ["uno:12",     "sd1:MISO",  "green",  []],
+    ["uno:13",     "sd1:SCK",   "yellow", []],
+
+    ["uno:9",      "srv1:PWM",  "orange", []],
+    ["uno:5V",     "srv1:V+",   "red",    []],
+    ["uno:GND.5",  "srv1:GND",  "black",  []],
+
+    ["uno:7",      "rr:1",      "red",    []],
+    ["rr:2",       "led_r:A",   "red",    []],
+    ["led_r:K",    "uno:GND.6", "black",  []],
+
+    ["uno:6",      "ry:1",      "yellow", []],
+    ["ry:2",       "led_y:A",   "yellow", []],
+    ["led_y:K",    "uno:GND.7", "black",  []],
+
+    ["uno:5",      "rg:1",      "green",  []],
+    ["rg:2",       "led_g:A",   "green",  []],
+    ["led_g:K",    "uno:GND.8", "black",  []],
+
+    ["uno:8",      "buz1:1",    "orange", []],
+    ["buz1:2",     "uno:GND.9", "black",  []],
+
+    ["uno:5V",     "gps1:VCC",  "red",    []],
+    ["uno:GND.10", "gps1:GND",  "black",  []],
+    ["uno:3",      "gps1:TX",   "green",  []],
+    ["uno:4",      "gps1:RX",   "yellow", []],
+
+    ["uno:5V",     "lora1:VCC",  "red",    []],
+    ["uno:GND.11", "lora1:GND",  "black",  []],
+    ["uno:13",     "lora1:SCK",  "blue",   []],
+    ["uno:11",     "lora1:MOSI", "green",  []],
+    ["uno:12",     "lora1:MISO", "yellow", []],
+    ["uno:A",      "lora1:NSS",  "purple", []],
+    ["uno:2",      "lora1:DIO0", "orange", []]
+  ]
 }
