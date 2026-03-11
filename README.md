@@ -52,10 +52,17 @@ You may be prompted to get a CI Token, go ahead and make that
 
 > [!NOTE]
 > There is a vscode extension for platformio, I'd suggest using it. Perhaps if you use the extension you may not need the cli so try it out first before doing the following.
-
-Windows:
+>
+> Windows:
 ```powershell
 wget -O get-platformio.py https://raw.githubusercontent.com/platformio/platformio-core-installer/master/get-platformio.py
 python3 get-platformio.py
 ```
 
+> ## Reference links:
+
+### BMP280
+- https://wokwi.com/projects/431553492560956417
+
+### MPU6050 
+- https://wokwi.com/projects/305936654686749250
