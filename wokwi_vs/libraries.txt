@@ -1,0 +1,6 @@
+Adafruit BMP280 Library
+Adafruit Unified Sensor
+LiquidCrystal I2C
+MPU6050
+LoRa
+Servo

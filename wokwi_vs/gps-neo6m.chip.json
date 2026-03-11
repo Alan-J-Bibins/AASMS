@@ -1,0 +1,12 @@
+{
+  "name": "GPS NEO-6M",
+  "author": "Alan & Sukruta",
+  "pins": [
+    { "name": "VCC",  "x": 0,  "y": 0,  "type": "pwrIn"  },
+    { "name": "GND",  "x": 0,  "y": 16, "type": "pwrIn"  },
+    { "name": "TX",   "x": 48, "y": 0,  "type": "uart.tx" },
+    { "name": "RX",   "x": 48, "y": 16, "type": "uart.rx" }
+  ],
+  "width": 64,
+  "height": 32
+}

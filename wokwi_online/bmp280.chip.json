@@ -1,0 +1,29 @@
+{
+  "name": "BMP280",
+  "author": "TG",
+  "pins": [
+    "VCC",
+    "GND",
+    "SDA",
+    "SCL",
+    "","",""
+  ],
+  "controls": [
+    {
+      "id": "temp",
+      "label": "Temperature",
+      "type": "range",
+      "min": 0,
+"max": 1048575,
+"step": 256
+    },
+    {
+      "id": "press",
+      "label": "Pressure",
+      "type": "range",
+      "min": 0,
+"max": 1048575,
+"step": 256
+    }
+  ]
+}

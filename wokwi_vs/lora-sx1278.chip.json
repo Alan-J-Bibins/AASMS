@@ -1,0 +1,16 @@
+{
+  "name": "LoRa SX1278",
+  "author": "Alan & Sukruta",
+  "pins": [
+    { "name": "VCC",  "x": 0,  "y": 0,  "type": "pwrIn"    },
+    { "name": "GND",  "x": 0,  "y": 16, "type": "pwrIn"    },
+    { "name": "SCK",  "x": 48, "y": 0,  "type": "spi.sck"  },
+    { "name": "MOSI", "x": 48, "y": 16, "type": "spi.mosi" },
+    { "name": "MISO", "x": 48, "y": 32, "type": "spi.miso" },
+    { "name": "NSS",  "x": 48, "y": 48, "type": "spi.cs"   },
+    { "name": "DIO0", "x": 0,  "y": 32, "type": "digital"  },
+    { "name": "RST",  "x": 0,  "y": 48, "type": "digital"  }
+  ],
+  "width": 64,
+  "height": 64
+}

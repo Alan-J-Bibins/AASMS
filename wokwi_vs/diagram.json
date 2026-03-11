@@ -11,11 +11,11 @@
       "attrs": {}
     },
 
-    { "type": "wokwi-bmp280",       "id": "bmp1",  "top": 20,  "left": 650, "attrs": {} },
-    { "type": "wokwi-mpu6050",      "id": "imu1",  "top": 180, "left": 650, "attrs": {} },
-    { "type": "wokwi-lcd1602",      "id": "lcd1",  "top": 20,  "left": -80, "attrs": { "pins": "i2c" } },
-    { "type": "wokwi-microsd-card", "id": "sd1",   "top": 420, "left": -80, "attrs": {} },
-    { "type": "wokwi-servo",        "id": "srv1",  "top": 20,  "left": 920, "attrs": {} },
+    { "type": "wokwi-bmp280",       "id": "bmp1", "top": 20,  "left": 650, "attrs": {} },
+    { "type": "wokwi-mpu6050",      "id": "imu1", "top": 180, "left": 650, "attrs": {} },
+    { "type": "wokwi-lcd1602",      "id": "lcd1", "top": 20,  "left": -80, "attrs": { "pins": "i2c" } },
+    { "type": "wokwi-microsd-card", "id": "sd1",  "top": 420, "left": -80, "attrs": {} },
+    { "type": "wokwi-servo",        "id": "srv1", "top": 20,  "left": 920, "attrs": {} },
 
     { "type": "wokwi-led",      "id": "led_r", "top": 420, "left": 700, "attrs": { "color": "red"    } },
     { "type": "wokwi-led",      "id": "led_y", "top": 470, "left": 700, "attrs": { "color": "yellow" } },
@@ -27,24 +27,18 @@
     { "type": "wokwi-resistor", "id": "rg",    "top": 520, "left": 640, "attrs": { "value": "220" } },
 
     {
-      "type": "custom-chip",
+      "type": "chip",
       "id": "gps1",
       "top": 560,
       "left": 200,
-      "attrs": {
-        "chip": "gps-neo6m",
-        "label": "NEO-6M GPS"
-      }
+      "attrs": { "src": "gps-neo6m.chip.c", "label": "NEO-6M GPS" }
     },
     {
-      "type": "custom-chip",
+      "type": "chip",
       "id": "lora1",
       "top": 560,
       "left": 500,
-      "attrs": {
-        "chip": "lora-sx1278",
-        "label": "SX1278 LoRa"
-      }
+      "attrs": { "src": "lora-sx1278.chip.c", "label": "SX1278 LoRa" }
     }
   ],
   "connections": [
@@ -99,7 +93,8 @@
     ["uno:13",     "lora1:SCK",  "blue",   []],
     ["uno:11",     "lora1:MOSI", "green",  []],
     ["uno:12",     "lora1:MISO", "yellow", []],
-    ["uno:A",      "lora1:NSS",  "purple", []],
-    ["uno:2",      "lora1:DIO0", "orange", []]
+    ["uno:A0",     "lora1:NSS",  "purple", []],
+    ["uno:2",      "lora1:DIO0", "orange", []],
+    ["uno:A1",     "lora1:RST",  "white",  []]
   ]
 }
