@@ -1,0 +1,47 @@
+{
+  "name": "BMP280",
+  "author": "Anonymous",
+  "pins": [
+    "VCC",
+    "GND",
+    "SCK",
+    "SDI",
+    "CS",
+    "SDO",
+    "",
+    "",
+    "",
+    "",
+    ""
+  ],
+  "controls": [
+    {
+      "id": "TEMP",
+      "label": "Temperature (°C)",
+      "type": "range",
+      "min": -4000,
+      "max": 8500,
+      "step": 100,
+      "value": 2500
+    },
+    {
+      "id": "PRES",
+      "label": "Pressure (Pa)",
+      "type": "range",
+      "min": 30000,
+      "max": 110000,
+      "step": 100,
+      "value": 101325
+    },
+    {
+      "id": "ALTITUDE",
+      "label": "Altitude (m)",
+      "type": "range",
+      "min": -500,
+      "max": 9000,
+      "step": 10,
+      "value": 0
+    }
+  ]
+}
+
