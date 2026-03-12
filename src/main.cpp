@@ -5,6 +5,7 @@
 #include <Wire.h>
 
 // Pins assigned on the arduino
+const int servoPin = 3;
 const int confirmButtonPin = 2;
 const int addPotentiometerPin = A0;
 const int subPotentiometerPin = A1;
@@ -14,12 +15,13 @@ const int bmpCS = 10;
 Adafruit_BMP280 bmp(bmpCS);
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 
+int oldButtonValue = HIGH;
 void setup()
 {
     Serial.begin(9600);
     Serial.println(F("Initalizing..."));
 
-    pinMode(confirmButtonPin, INPUT);
+    pinMode(confirmButtonPin, INPUT_PULLUP);
 
     lcd.init();
     lcd.backlight();
@@ -40,14 +42,16 @@ void setup()
         Adafruit_BMP280::SAMPLING_X2, // Temp oversampling
         Adafruit_BMP280::SAMPLING_X16, // Pressure oversampling
         Adafruit_BMP280::FILTER_X16, // Filtering for smoothness
-        Adafruit_BMP280::STANDBY_MS_500
-    );
+        Adafruit_BMP280::STANDBY_MS_500);
 
     Serial.println(F("System Ready."));
 }
 
 void loop()
 {
+
+    int newButtonValue = digitalRead(confirmButtonPin);
+
     int addPotentiometerValue = analogRead(addPotentiometerPin);
     int subPotentiometerValue = analogRead(subPotentiometerPin);
 
@@ -58,22 +62,25 @@ void loop()
     float altitude = bmp.readAltitude();
     float newAltitude = altitude + positiveOffset - negativeOffset;
 
-    if (digitalRead(confirmButtonPin) == HIGH) {
-        Serial.println(F("Button has been pressed"));
-        Serial.print(F("Current: "));
-        Serial.println(altitude);
-        Serial.print(F("New: "));
-        Serial.println(newAltitude);
+    if (newButtonValue != oldButtonValue) {
+        if (newButtonValue == LOW) {
+            Serial.println(F("Button has been pressed"));
+            Serial.print(F("Current: "));
+            Serial.println(altitude);
+            Serial.print(F("New: "));
+            Serial.println(newAltitude);
 
-        lcd.clear();
-        lcd.setCursor(0, 0);
-        lcd.print("Target Set: ");
-        lcd.setCursor(0, 1);
-        lcd.print(newAltitude);
-        lcd.print(" m");
+            lcd.clear();
+            lcd.setCursor(0, 0);
+            lcd.print("Target Set: ");
+            lcd.setCursor(0, 1);
+            lcd.print(newAltitude);
+            lcd.print(" m");
+        } else {
+            Serial.println(F("Button has been released"));
+        }
 
         // We don't want the button to trigger a million times do we
         delay(200);
     }
-
 }
