@@ -1,20 +1,23 @@
 #include <Adafruit_BMP280.h>
 #include <Arduino.h>
-#include <LiquidCrystal_I2C.h>
+#include <LiquidCrystal.h>
 #include <SPI.h>
 #include <Servo.h>
 #include <Wire.h>
 
 // Pins
 const int servoPin = 3;
-const int confirmButtonPin = 2;
+const int confirmButtonPin = 8;
 const int addPotentiometerPin = A0;
 const int subPotentiometerPin = A1;
 const int bmpCS = 10;
 
+// LCD pins
+const int rs = 9, en = 2, d4 = 7, d5 = 6, d6 = 5, d7 = 4;
+
 // Objects
 Adafruit_BMP280 bmp(bmpCS);
-LiquidCrystal_I2C lcd(0x27, 16, 2);
+LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
 Servo ventServo;
 
 // State
@@ -28,7 +31,8 @@ bool targetSet = false;
 const bool SIMULATION_MODE = true;
 float simulatedAltitude = 0.0;
 
-float getAltitude() {
+float getAltitude()
+{
     if (SIMULATION_MODE) {
         return simulatedAltitude;
     } else {
@@ -43,17 +47,18 @@ void setup()
 
     pinMode(confirmButtonPin, INPUT_PULLUP);
     ventServo.attach(servoPin);
-    ventServo.write(0);  // Start closed
+    ventServo.write(0); // Start closed
 
-    lcd.init();
-    lcd.backlight();
+    lcd.begin(16, 2);
+    lcd.clear();
     lcd.print("Welcome");
 
     if (!bmp.begin()) {
         Serial.println(F("Cannot find BMP280 Sensor"));
         lcd.setCursor(0, 1);
         lcd.print("Sensor error");
-        while (1);
+        while (1)
+            ;
     }
 
     bmp.setSampling(
@@ -75,12 +80,12 @@ void loop()
 {
     // --- Simulation: read altitude from Serial Monitor ---
     if (SIMULATION_MODE && Serial.available()) {
-    String input = Serial.readStringUntil('\n');  // reads until newline, discards it
-    input.trim();                                  // removes any leftover \r or spaces
-    simulatedAltitude = input.toFloat();
-    Serial.print(F("Simulated altitude set to: "));
-    Serial.println(simulatedAltitude);
-}
+        String input = Serial.readStringUntil('\n'); // reads until newline, discards it
+        input.trim(); // removes any leftover \r or spaces
+        simulatedAltitude = input.toFloat();
+        Serial.print(F("Simulated altitude set to: "));
+        Serial.println(simulatedAltitude);
+    }
 
     float altitude = getAltitude();
 
@@ -88,36 +93,40 @@ void loop()
     int addPotentiometerValue = analogRead(addPotentiometerPin);
     int subPotentiometerValue = analogRead(subPotentiometerPin);
 
-    int positiveOffset = map(addPotentiometerValue, 0, 1023, 0, 1000);
-    int negativeOffset = map(subPotentiometerValue, 0, 1023, 0, 1000);
+    int positiveOffset = map(addPotentiometerValue, 0, 1023, 0, 5000);
+    int negativeOffset = map(subPotentiometerValue, 0, 1023, 0, 5000);
     float previewAltitude = altitude + positiveOffset - negativeOffset;
 
-    // --- Button: lock in target altitude ---
+    if (previewAltitude < 0)
+        previewAltitude = 0; // We'd want to prevent negative altitudes T-T
+
     if (newButtonValue != oldButtonValue) {
-    if (newButtonValue == LOW) {
-        targetAltitude = previewAltitude;
-        targetSet = true;
+        if (newButtonValue == LOW) {
+            targetAltitude = previewAltitude;
+            targetSet = true;
 
-        Serial.println(F("--- Target Confirmed ---"));
-        Serial.print(F("Current Altitude : ")); Serial.println(altitude);
-        Serial.print(F("Target Altitude  : ")); Serial.println(targetAltitude);
+            Serial.println(F("--- Target Confirmed ---"));
+            Serial.print(F("Current Altitude : "));
+            Serial.println(altitude);
+            Serial.print(F("Target Altitude  : "));
+            Serial.println(targetAltitude);
 
-        lcd.clear();
-        lcd.setCursor(0, 0);
-        lcd.print("Target Set:");
-        lcd.setCursor(0, 1);
-        lcd.print(targetAltitude, 1);
-        lcd.print(" m");
-    } else {
-        Serial.println(F("Button released."));
+            lcd.clear();
+            lcd.setCursor(0, 0);
+            lcd.print("Target Set:");
+            lcd.setCursor(0, 1);
+            lcd.print(targetAltitude, 1);
+            lcd.print(" m");
+        } else {
+            Serial.println(F("Button released."));
+        }
+        oldButtonValue = newButtonValue;
+        delay(200);
     }
-    oldButtonValue = newButtonValue;  // ← must be HERE, inside the outer if
-    delay(200);
-}
 
     // --- Feedback loop ---
     if (targetSet) {
-        if (altitude > targetAltitude) {
+        if (altitude < targetAltitude) {
             ventServo.write(90);
             Serial.print(F("STATE: VENTING  | Alt: "));
         } else {
@@ -130,7 +139,6 @@ void loop()
         Serial.print(targetAltitude, 1);
         Serial.println(F("m"));
 
-        // Live LCD update
         lcd.setCursor(0, 0);
         lcd.print("Alt:");
         lcd.print(altitude, 1);
@@ -140,6 +148,4 @@ void loop()
         lcd.print(targetAltitude, 1);
         lcd.print("m   ");
     }
-
-    delay(500);
 }
