@@ -136,7 +136,7 @@ void loop()
 
     int addVal = analogRead(addPotPin);
     int subVal = analogRead(subPotPin);
-    float previewAlt = currentAltitude + map(addVal, 0, 4095, 0, 100) - map(subVal, 0, 4095, 0, 100);
+    float previewAlt = currentAltitude + map(addVal, 0, 4095, 0, 10) - map(subVal, 0, 4095, 0, 10);
 
     static int lastBtn = HIGH;
     int btn = digitalRead(confirmButtonPin);
