@@ -1,5 +1,6 @@
 #include <Adafruit_BMP280.h>
 #include <Arduino.h>
+#include <ArduinoJson.h>
 #include <ESP32Servo.h>
 #include <ESPmDNS.h>
 #include <LiquidCrystal.h>
@@ -50,10 +51,13 @@ void handleRoot()
 
 void handleSetTarget()
 {
-    if (server.hasArg("altitude")) {
-        String val = server.arg("altitude");
-        float newTarget = val.toFloat();
+    if (server.hasArg("plain")) {
+        String body = server.arg("plain");
 
+        JsonDocument doc;
+        deserializeJson(doc, body);
+
+        float newTarget = doc["altitude"];
         if (newTarget >= 0) {
             targetAltitude = newTarget;
             targetSet = true;
