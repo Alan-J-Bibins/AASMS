@@ -145,7 +145,6 @@ void loop()
         targetSet = true;
         lcd.clear();
         lcd.print("LOCKED!");
-        delay(200);
     }
     lastBtn = btn;
 
