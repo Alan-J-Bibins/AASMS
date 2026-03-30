@@ -126,6 +126,7 @@ void setup()
     server.begin();
 
     xTaskCreatePinnedToCore(PIDLoop, "PIDTask", 4096, NULL, 1, &PIDTaskHandle, 1);
+    pinMode(2, OUTPUT);
     digitalWrite(2, HIGH);
 }
 
