@@ -1,15 +1,16 @@
 #include <Adafruit_BMP280.h>
 #include <Arduino.h>
 #include <ESP32Servo.h>
+#include <ESPmDNS.h>
 #include <LiquidCrystal.h>
 #include <SPI.h>
+#include <WString.h>
 #include <WebServer.h>
 #include <WiFi.h>
 #include <esp32-hal-gpio.h>
-#include <ESPmDNS.h>
 
-const char* ap_ssid = "surjo";
-const char* ap_password = "1234567890";
+const char* wifi_ssid = "Honor10Lite";
+const char* wifi_password = "AJBfifa2k20";
 WebServer server(80);
 
 const int servoPin = 17;
@@ -45,6 +46,47 @@ void handleRoot()
     json += "  \"status\": \"" + String(targetSet ? "LOCKED" : "IDLE") + "\"\n";
     json += "}\n";
     server.send(200, "application/json", json);
+}
+
+void handleSetTarget()
+{
+    if (server.hasArg("altitude")) {
+        String val = server.arg("altitude");
+        float newTarget = val.toFloat();
+
+        if (newTarget >= 0) {
+            targetAltitude = newTarget;
+            targetSet = true;
+
+            String message = "Target updated to: " + String(targetAltitude) + "m";
+            String json = "{\n";
+            json += "  \"success\": " + String(true) + ",\n";
+            json += "  \"message\": " + String(message) + ",\n";
+            json += "}\n";
+            server.send(200, "application/json", json);
+            Serial.println(message);
+            lcd.setCursor(0, 1);
+            lcd.print("Tgt: ");
+            lcd.print(targetAltitude, 1);
+            lcd.print("m    ");
+        } else {
+            String message = "Invalid altitude value";
+            String json = "{\n";
+            json += "  \"success\": " + String(false) + ",\n";
+            json += "  \"message\": " + String(message) + ",\n";
+            json += "}\n";
+            server.send(400, "application/json", json);
+            Serial.println(message);
+        }
+    } else {
+        String message = "Missing 'altitude' value";
+        String json = "{\n";
+        json += "  \"success\": " + String(false) + ",\n";
+        json += "  \"message\": " + String(message) + ",\n";
+        json += "}\n";
+        server.send(400, "application/json", json);
+        Serial.println(message);
+    }
 }
 
 void PIDLoop(void* pvParameters)
@@ -102,8 +144,8 @@ void setup()
         Adafruit_BMP280::SAMPLING_X16, Adafruit_BMP280::FILTER_X16,
         Adafruit_BMP280::STANDBY_MS_500);
 
-    Serial.printf("Connecting to %s ", ap_ssid);
-    WiFi.begin(ap_ssid, ap_password);
+    Serial.printf("Connecting to %s ", wifi_ssid);
+    WiFi.begin(wifi_ssid, wifi_password);
     while (WiFi.status() != WL_CONNECTED) {
         delay(500);
         Serial.print(".");
@@ -123,6 +165,7 @@ void setup()
     Serial.println(WiFi.localIP());
 
     server.on("/", handleRoot);
+    server.on("/set", HTTP_POST, handleSetTarget);
     server.begin();
 
     xTaskCreatePinnedToCore(PIDLoop, "PIDTask", 4096, NULL, 1, &PIDTaskHandle, 1);
