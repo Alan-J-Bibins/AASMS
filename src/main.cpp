@@ -44,9 +44,11 @@ void handleRoot()
     json += "  \"alt_m\": " + String(currentAltitude) + ",\n";
     json += "  \"target_m\": " + String(targetAltitude) + ",\n";
     json += "  \"burner_deg\": " + String(currentServoAngle) + ",\n";
-    json += "  \"status\": \"" + String(targetSet ? "LOCKED" : "IDLE") + "\"\n";
+    json += "  \"status\": \"" + String(currentServoAngle > 0 ? "LOCKED" : "IDLE") + "\"\n";
     json += "}\n";
+    server.sendHeader("Access-Control-Allow-Origin", "*");
     server.send(200, "application/json", json);
+    Serial.println("Sent Metrics");
 }
 
 void handleSetTarget()
@@ -65,8 +67,9 @@ void handleSetTarget()
             String message = "Target updated to: " + String(targetAltitude) + "m";
             String json = "{\n";
             json += "  \"success\": " + String(true) + ",\n";
-            json += "  \"message\": " + String(message) + ",\n";
+            json += "  \"message\": \"" + String(message) + "\"\n";
             json += "}\n";
+            server.sendHeader("Access-Control-Allow-Origin", "*");
             server.send(200, "application/json", json);
             Serial.println(message);
             lcd.setCursor(0, 1);
@@ -77,8 +80,9 @@ void handleSetTarget()
             String message = "Invalid altitude value";
             String json = "{\n";
             json += "  \"success\": " + String(false) + ",\n";
-            json += "  \"message\": " + String(message) + ",\n";
+            json += "  \"message\": \"" + String(message) + "\"\n";
             json += "}\n";
+            server.sendHeader("Access-Control-Allow-Origin", "*");
             server.send(400, "application/json", json);
             Serial.println(message);
         }
@@ -86,8 +90,9 @@ void handleSetTarget()
         String message = "Missing 'altitude' value";
         String json = "{\n";
         json += "  \"success\": " + String(false) + ",\n";
-        json += "  \"message\": " + String(message) + ",\n";
+        json += "  \"message\": \"" + String(message) + "\"\n";
         json += "}\n";
+        server.sendHeader("Access-Control-Allow-Origin", "*");
         server.send(400, "application/json", json);
         Serial.println(message);
     }
@@ -169,12 +174,25 @@ void setup()
     Serial.println(WiFi.localIP());
 
     server.on("/", handleRoot);
+    server.on("/", HTTP_OPTIONS, []() {
+        server.sendHeader("Access-Control-Allow-Origin", "*");
+        server.sendHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+        server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
+        server.send(204);
+    });
     server.on("/set", HTTP_POST, handleSetTarget);
+    server.on("/set", HTTP_OPTIONS, []() {
+        server.sendHeader("Access-Control-Allow-Origin", "*");
+        server.sendHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
+        // This is the line you're missing!
+        server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
+        server.send(204);
+    });
     server.begin();
 
-    xTaskCreatePinnedToCore(PIDLoop, "PIDTask", 4096, NULL, 1, &PIDTaskHandle, 1);
     pinMode(2, OUTPUT);
     digitalWrite(2, HIGH);
+    xTaskCreatePinnedToCore(PIDLoop, "PIDTask", 4096, NULL, 1, &PIDTaskHandle, 1);
 }
 
 void loop()
