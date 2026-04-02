@@ -10,6 +10,7 @@
 #include <WiFi.h>
 #include <esp32-hal-gpio.h>
 
+// --- Configuration ---
 const char* wifi_ssid = "Honor10Lite";
 const char* wifi_password = "AJBfifa2k20";
 WebServer server(80);
@@ -24,120 +25,148 @@ Adafruit_BMP280 bmp(bmpCS);
 LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
 Servo ventServo;
 
+// --- Global Flight State ---
 volatile float currentAltitude = 0;
+volatile float groundAltitude = 0;
 volatile float targetAltitude = -1;
 volatile bool targetSet = false;
+volatile bool isLanding = false;
 volatile int currentServoAngle = 0;
 volatile float currentTemp = 0;
 volatile float currentPressure = 0;
 
-// PID Constants
+// PID & Physics Constants
 float Kp = 1.2, Ki = 0.01, Kd = 0.5;
+const float DESCENT_RATE = 0.4f; // Meters per second
+const float GROUND_THRESHOLD = 2.0f;
 
 TaskHandle_t PIDTaskHandle;
 
+void sendCORSJson(int code, String content)
+{
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    server.send(code, "application/json", content);
+}
+
 void handleRoot()
 {
-    String json = "{\n";
-    json += "  \"temp_c\": " + String(currentTemp) + ",\n";
-    json += "  \"pressure_hpa\": " + String(currentPressure) + ",\n";
-    json += "  \"alt_m\": " + String(currentAltitude) + ",\n";
-    json += "  \"target_m\": " + String(targetAltitude) + ",\n";
-    json += "  \"burner_deg\": " + String(currentServoAngle) + ",\n";
-    json += "  \"status\": \"" + String(currentServoAngle > 0 ? "LOCKED" : "IDLE") + "\"\n";
-    json += "}\n";
-    server.sendHeader("Access-Control-Allow-Origin", "*");
-    server.send(200, "application/json", json);
-    Serial.println("Sent Metrics");
+    float altAGL = currentAltitude - groundAltitude;
+    if (altAGL < 0)
+        altAGL = 0;
+
+    String statusStr;
+    if (isLanding) {
+        statusStr = (altAGL < GROUND_THRESHOLD) ? "LANDED" : "LANDING";
+    } else if (targetSet) {
+        statusStr = "LOCKED";
+    } else {
+        statusStr = "IDLE";
+    }
+
+    // Full JSON Restoration
+    String json = "{";
+    json += "\"temp_c\":" + String(currentTemp, 1) + ",";
+    json += "\"pressure_hpa\":" + String(currentPressure, 1) + ",";
+    json += "\"alt_m\":" + String(currentAltitude, 2) + ",";
+    json += "\"alt_agl\":" + String(altAGL, 2) + ",";
+    json += "\"target_m\":" + String(targetAltitude, 2) + ",";
+    json += "\"burner_deg\":" + String(currentServoAngle) + ",";
+    json += "\"is_landing\":" + String(isLanding ? "true" : "false") + ",";
+    json += "\"status\":\"" + statusStr + "\"";
+    json += "}";
+
+    sendCORSJson(200, json);
 }
 
 void handleSetTarget()
 {
     if (server.hasArg("plain")) {
-        String body = server.arg("plain");
-
         JsonDocument doc;
-        deserializeJson(doc, body);
-
+        deserializeJson(doc, server.arg("plain"));
         float newTarget = doc["altitude"];
+
         if (newTarget >= 0) {
             targetAltitude = newTarget;
             targetSet = true;
-
-            String message = "Target updated to: " + String(targetAltitude) + "m";
-            String json = "{\n";
-            json += "  \"success\": " + String(true) + ",\n";
-            json += "  \"message\": \"" + String(message) + "\"\n";
-            json += "}\n";
-            server.sendHeader("Access-Control-Allow-Origin", "*");
-            server.send(200, "application/json", json);
-            Serial.println(message);
-            lcd.setCursor(0, 1);
-            lcd.print("Tgt: ");
-            lcd.print(targetAltitude, 1);
-            lcd.print("m    ");
+            isLanding = false; // Cancel landing if manual target is sent
+            sendCORSJson(200, "{\"success\":true,\"message\":\"Target altitude locked\"}");
         } else {
-            String message = "Invalid altitude value";
-            String json = "{\n";
-            json += "  \"success\": " + String(false) + ",\n";
-            json += "  \"message\": \"" + String(message) + "\"\n";
-            json += "}\n";
-            server.sendHeader("Access-Control-Allow-Origin", "*");
-            server.send(400, "application/json", json);
-            Serial.println(message);
+            sendCORSJson(400, "{\"success\":false,\"message\":\"Invalid altitude\"}");
         }
-    } else {
-        String message = "Missing 'altitude' value";
-        String json = "{\n";
-        json += "  \"success\": " + String(false) + ",\n";
-        json += "  \"message\": \"" + String(message) + "\"\n";
-        json += "}\n";
-        server.sendHeader("Access-Control-Allow-Origin", "*");
-        server.send(400, "application/json", json);
-        Serial.println(message);
     }
 }
 
+void handleLandCommand()
+{
+    isLanding = true;
+    targetSet = true;
+    sendCORSJson(200, "{\"success\":true,\"message\":\"Landing sequence started\"}");
+    Serial.println("WEB_CMD: Landing Initiated");
+}
+
+// --- PID Task (Pinned to Core 1) ---
 void PIDLoop(void* pvParameters)
 {
-    float lastError = 0;
-    float integral = 0;
+    float lastError = 0, integral = 0;
     unsigned long lastTime = millis();
+
+    // CRITICAL: This must be outside the loop to track time correctly
+    static unsigned long lastDescendTick = 0;
 
     for (;;) {
         unsigned long now = millis();
-        float dt = (now - lastTime) / 1000.0;
+        float dt = (now - lastTime) / 1000.0f;
 
+        // Sensor Refresh
         currentAltitude = bmp.readAltitude(1013.25);
         currentTemp = bmp.readTemperature();
         currentPressure = bmp.readPressure() / 100.0F;
 
+        // --- LANDING RAMP LOGIC ---
+        if (isLanding) {
+            if (lastDescendTick == 0)
+                lastDescendTick = now;
+
+            if (now - lastDescendTick >= 1000) {
+                if (targetAltitude > (groundAltitude + 0.1f)) {
+                    targetAltitude -= DESCENT_RATE;
+                    Serial.printf("DESCENDING: New Target: %.2f\n", targetAltitude);
+                } else {
+                    targetAltitude = groundAltitude;
+                    Serial.println("LANDING COMPLETE: Target reached ground.");
+                }
+                lastDescendTick = now;
+                Serial.printf("TICK: Target is now %.2f\n", targetAltitude);
+            }
+        } else {
+            lastDescendTick = 0;
+        }
+
+        // --- PID CALCULATION ---
         if (targetSet && dt > 0) {
             float error = targetAltitude - currentAltitude;
-
             float pOut = Kp * error;
-            if (abs(error) < 10.0)
+
+            if (abs(error) < 10.0f)
                 integral += error * dt;
             float iOut = Ki * integral;
             float dOut = Kd * ((error - lastError) / dt);
 
-            float totalOutput = pOut + iOut + dOut;
-            currentServoAngle = constrain((int)totalOutput, 0, 90);
+            currentServoAngle = constrain((int)(pOut + iOut + dOut), 0, 90);
             ventServo.write(currentServoAngle);
-
             lastError = error;
         }
-        lastTime = now;
 
-        vTaskDelay(50 / portTICK_PERIOD_MS);
+        lastTime = now;
+        vTaskDelay(50 / portTICK_PERIOD_MS); // Run at 20Hz
     }
 }
 
 void setup()
 {
     Serial.begin(115200);
-
     pinMode(confirmButtonPin, INPUT_PULLUP);
+
     ESP32PWM::allocateTimer(0);
     ventServo.setPeriodHertz(50);
     ventServo.attach(servoPin, 500, 2400);
@@ -145,53 +174,42 @@ void setup()
 
     lcd.begin(16, 2);
     if (!bmp.begin()) {
-        Serial.println("BMP Fail");
+        Serial.println("BMP280 Search Fail");
         while (1)
             ;
     }
-    bmp.setSampling(Adafruit_BMP280::MODE_NORMAL, Adafruit_BMP280::SAMPLING_X2,
-        Adafruit_BMP280::SAMPLING_X16, Adafruit_BMP280::FILTER_X16,
-        Adafruit_BMP280::STANDBY_MS_500);
 
-    Serial.printf("Connecting to %s ", wifi_ssid);
+    delay(2000);
+    groundAltitude = bmp.readAltitude(1013.25);
+    targetAltitude = groundAltitude;
+
     WiFi.begin(wifi_ssid, wifi_password);
     while (WiFi.status() != WL_CONNECTED) {
         delay(500);
         Serial.print(".");
     }
 
-    Serial.println("\nWiFi Connected!");
-
-    if (!MDNS.begin("balloon")) {
-        Serial.println("Error setting up MDNS responder!");
-    } else {
-        Serial.println("mDNS responder started: http://balloon.local");
+    if (MDNS.begin("balloon")) {
+        MDNS.addService("http", "tcp", 80);
     }
 
-    MDNS.addService("http", "tcp", 80);
+    server.on("/", HTTP_GET, handleRoot);
+    server.on("/set", HTTP_POST, handleSetTarget);
+    server.on("/land", HTTP_POST, handleLandCommand);
 
-    Serial.print("IP Address: ");
-    Serial.println(WiFi.localIP());
-
-    server.on("/", handleRoot);
-    server.on("/", HTTP_OPTIONS, []() {
+    auto cors = []() {
         server.sendHeader("Access-Control-Allow-Origin", "*");
         server.sendHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
         server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
         server.send(204);
-    });
-    server.on("/set", HTTP_POST, handleSetTarget);
-    server.on("/set", HTTP_OPTIONS, []() {
-        server.sendHeader("Access-Control-Allow-Origin", "*");
-        server.sendHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
-        // This is the line you're missing!
-        server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
-        server.send(204);
-    });
-    server.begin();
+    };
+    server.on("/", HTTP_OPTIONS, cors);
+    server.on("/set", HTTP_OPTIONS, cors);
+    server.on("/land", HTTP_OPTIONS, cors);
 
     pinMode(2, OUTPUT);
     digitalWrite(2, HIGH);
+    server.begin();
     xTaskCreatePinnedToCore(PIDLoop, "PIDTask", 4096, NULL, 1, &PIDTaskHandle, 1);
 }
 
@@ -206,25 +224,31 @@ void loop()
     static int lastBtn = HIGH;
     int btn = digitalRead(confirmButtonPin);
     if (btn == LOW && lastBtn == HIGH) {
-        targetAltitude = (previewAlt < 0) ? 0 : previewAlt;
+        targetAltitude = previewAlt;
         targetSet = true;
+        isLanding = false; // Manual button press kills auto-landing
         lcd.clear();
-        lcd.print("LOCKED!");
+        lcd.print("MANUAL LOCK");
     }
     lastBtn = btn;
 
+    // Display Update
     static unsigned long lastLCD = 0;
-    if (millis() - lastLCD > 250) {
+    if (millis() - lastLCD > 300) {
         lcd.setCursor(0, 0);
-        lcd.print("Alt: ");
-        lcd.print(currentAltitude, 1);
+        float hgt = currentAltitude - groundAltitude;
+        lcd.print("AGL: ");
+        lcd.print(hgt < 0 ? 0.0f : hgt, 1);
         lcd.print("m  ");
+
         lcd.setCursor(0, 1);
-        lcd.print(targetSet ? "Tgt: " : "Set: ");
-        lcd.print(targetSet ? targetAltitude : previewAlt, 1);
-        lcd.print("m  ");
+        if (isLanding)
+            lcd.print("MODE: LANDING  ");
+        else {
+            lcd.print(targetSet ? "Tgt: " : "Set: ");
+            lcd.print(targetSet ? targetAltitude : previewAlt, 1);
+            lcd.print("m  ");
+        }
         lastLCD = millis();
     }
-
-    delay(10);
 }
