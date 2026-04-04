@@ -9,6 +9,7 @@
 #include <WebServer.h>
 #include <WiFi.h>
 #include <Wire.h>
+#include <esp32-hal-adc.h>
 #include <esp32-hal-gpio.h>
 
 // --- Configuration ---
@@ -20,8 +21,8 @@ WebServer server(80);
 const int servoPin = 27; // Data on D27
 const int confirmButtonPin = 14; // Button on D14
 const int landButtonPin = 13; // Button on D13
-const int addPotPin = 34; // Pins 21/22 now used for I2C
-const int subPotPin = 35;
+const int addPotPin = 32; // Pins 21/22 now used for I2C
+const int subPotPin = 33;
 
 // I2C Instances (Pins 21/22)
 Adafruit_BMP280 bmp;
@@ -224,10 +225,14 @@ void loop()
     server.handleClient();
 
     // Logic for Button 1: Lock current altitude (Confirm)
+    int addVal = analogRead(addPotPin);
+    int subVal = analogRead(subPotPin);
+    float previewAlt = currentAltitude + map(addVal, 0, 4095, 0, 10) - map(subVal, 0, 4095, 0, 10);
+
     static int lastConfirm = HIGH;
     int confirmBtn = digitalRead(confirmButtonPin);
     if (confirmBtn == LOW && lastConfirm == HIGH) {
-        targetAltitude = currentAltitude;
+        targetAltitude = previewAlt;
         targetSet = true;
         isLanding = false;
         lcd.clear();
@@ -250,16 +255,18 @@ void loop()
     if (millis() - lastLCD > 300) {
         lcd.setCursor(0, 0);
         float hgt = currentAltitude - groundAltitude;
-        lcd.print("H: ");
+        lcd.print("AGL: ");
         lcd.print(hgt < 0 ? 0.0f : hgt, 1);
-        lcd.print("m T: ");
-        lcd.print(targetAltitude - groundAltitude, 1);
+        lcd.print("m  ");
 
         lcd.setCursor(0, 1);
         if (isLanding)
             lcd.print("MODE: LANDING  ");
-        else
-            lcd.print(targetSet ? "MODE: LOCKED   " : "MODE: IDLE     ");
+        else {
+            lcd.print(targetSet ? "Tgt: " : "Set: ");
+            lcd.print(targetSet ? targetAltitude : previewAlt, 1);
+            lcd.print("m  ");
+        }
         lastLCD = millis();
     }
 }
