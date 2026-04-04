@@ -3,11 +3,12 @@
 #include <ArduinoJson.h>
 #include <ESP32Servo.h>
 #include <ESPmDNS.h>
-#include <LiquidCrystal.h>
+#include <LiquidCrystal_I2C.h>
 #include <SPI.h>
 #include <WString.h>
 #include <WebServer.h>
 #include <WiFi.h>
+#include <Wire.h>
 #include <esp32-hal-gpio.h>
 
 // --- Configuration ---
@@ -15,14 +16,16 @@ const char* wifi_ssid = "Honor10Lite";
 const char* wifi_password = "AJBfifa2k20";
 WebServer server(80);
 
-const int servoPin = 17;
-const int confirmButtonPin = 21;
-const int addPotPin = 34, subPotPin = 35;
-const int bmpCS = 5;
-const int rs = 14, en = 13, d4 = 27, d5 = 26, d6 = 25, d7 = 33;
+// NEW PINS APPLIED
+const int servoPin = 27; // Data on D27
+const int confirmButtonPin = 14; // Button on D14
+const int landButtonPin = 13; // Button on D13
+const int addPotPin = 34; // Pins 21/22 now used for I2C
+const int subPotPin = 35;
 
-Adafruit_BMP280 bmp(bmpCS);
-LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
+// I2C Instances (Pins 21/22)
+Adafruit_BMP280 bmp;
+LiquidCrystal_I2C lcd(0x27, 16, 2);
 Servo ventServo;
 
 // --- Global Flight State ---
@@ -35,9 +38,9 @@ volatile int currentServoAngle = 0;
 volatile float currentTemp = 0;
 volatile float currentPressure = 0;
 
-// PID & Physics Constants
+// PID & Physics Constants (Kept exactly as original)
 float Kp = 1.2, Ki = 0.01, Kd = 0.5;
-const float DESCENT_RATE = 0.4f; // Meters per second
+const float DESCENT_RATE = 0.4f;
 const float GROUND_THRESHOLD = 2.0f;
 
 TaskHandle_t PIDTaskHandle;
@@ -63,7 +66,6 @@ void handleRoot()
         statusStr = "IDLE";
     }
 
-    // Full JSON Restoration
     String json = "{";
     json += "\"temp_c\":" + String(currentTemp, 1) + ",";
     json += "\"pressure_hpa\":" + String(currentPressure, 1) + ",";
@@ -88,7 +90,7 @@ void handleSetTarget()
         if (newTarget >= 0) {
             targetAltitude = newTarget;
             targetSet = true;
-            isLanding = false; // Cancel landing if manual target is sent
+            isLanding = false;
             sendCORSJson(200, "{\"success\":true,\"message\":\"Target altitude locked\"}");
         } else {
             sendCORSJson(400, "{\"success\":false,\"message\":\"Invalid altitude\"}");
@@ -104,25 +106,20 @@ void handleLandCommand()
     Serial.println("WEB_CMD: Landing Initiated");
 }
 
-// --- PID Task (Pinned to Core 1) ---
 void PIDLoop(void* pvParameters)
 {
     float lastError = 0, integral = 0;
     unsigned long lastTime = millis();
-
-    // CRITICAL: This must be outside the loop to track time correctly
     static unsigned long lastDescendTick = 0;
 
     for (;;) {
         unsigned long now = millis();
         float dt = (now - lastTime) / 1000.0f;
 
-        // Sensor Refresh
         currentAltitude = bmp.readAltitude(1013.25);
         currentTemp = bmp.readTemperature();
         currentPressure = bmp.readPressure() / 100.0F;
 
-        // --- LANDING RAMP LOGIC ---
         if (isLanding) {
             if (lastDescendTick == 0)
                 lastDescendTick = now;
@@ -130,19 +127,15 @@ void PIDLoop(void* pvParameters)
             if (now - lastDescendTick >= 1000) {
                 if (targetAltitude > (groundAltitude + 0.1f)) {
                     targetAltitude -= DESCENT_RATE;
-                    Serial.printf("DESCENDING: New Target: %.2f\n", targetAltitude);
                 } else {
                     targetAltitude = groundAltitude;
-                    Serial.println("LANDING COMPLETE: Target reached ground.");
                 }
                 lastDescendTick = now;
-                Serial.printf("TICK: Target is now %.2f\n", targetAltitude);
             }
         } else {
             lastDescendTick = 0;
         }
 
-        // --- PID CALCULATION ---
         if (targetSet && dt > 0) {
             float error = targetAltitude - currentAltitude;
             float pOut = Kp * error;
@@ -158,7 +151,7 @@ void PIDLoop(void* pvParameters)
         }
 
         lastTime = now;
-        vTaskDelay(50 / portTICK_PERIOD_MS); // Run at 20Hz
+        vTaskDelay(50 / portTICK_PERIOD_MS);
     }
 }
 
@@ -166,15 +159,23 @@ void setup()
 {
     Serial.begin(115200);
     pinMode(confirmButtonPin, INPUT_PULLUP);
+    pinMode(landButtonPin, INPUT_PULLUP);
+
+    // I2C Bus Init
+    Wire.begin(21, 22);
 
     ESP32PWM::allocateTimer(0);
     ventServo.setPeriodHertz(50);
     ventServo.attach(servoPin, 500, 2400);
     ventServo.write(0);
 
-    lcd.begin(16, 2);
-    if (!bmp.begin()) {
-        Serial.println("BMP280 Search Fail");
+    // I2C LCD Init
+    lcd.init();
+    lcd.backlight();
+
+    // I2C BMP280 Init
+    if (!bmp.begin(0x76)) {
+        Serial.println("BMP280 Fail");
         while (1)
             ;
     }
@@ -188,6 +189,11 @@ void setup()
         delay(500);
         Serial.print(".");
     }
+
+    IPAddress ip = WiFi.localIP();
+    Serial.println("");
+    Serial.print("WiFi Connected. IP: ");
+    Serial.println(ip);
 
     if (MDNS.begin("balloon")) {
         MDNS.addService("http", "tcp", 80);
@@ -217,38 +223,43 @@ void loop()
 {
     server.handleClient();
 
-    int addVal = analogRead(addPotPin);
-    int subVal = analogRead(subPotPin);
-    float previewAlt = currentAltitude + map(addVal, 0, 4095, 0, 10) - map(subVal, 0, 4095, 0, 10);
-
-    static int lastBtn = HIGH;
-    int btn = digitalRead(confirmButtonPin);
-    if (btn == LOW && lastBtn == HIGH) {
-        targetAltitude = previewAlt;
+    // Logic for Button 1: Lock current altitude (Confirm)
+    static int lastConfirm = HIGH;
+    int confirmBtn = digitalRead(confirmButtonPin);
+    if (confirmBtn == LOW && lastConfirm == HIGH) {
+        targetAltitude = currentAltitude;
         targetSet = true;
-        isLanding = false; // Manual button press kills auto-landing
+        isLanding = false;
         lcd.clear();
         lcd.print("MANUAL LOCK");
     }
-    lastBtn = btn;
+    lastConfirm = confirmBtn;
 
-    // Display Update
+    // Logic for Button 2: Land command
+    static int lastLand = HIGH;
+    int landBtn = digitalRead(landButtonPin);
+    if (landBtn == LOW && lastLand == HIGH) {
+        isLanding = true;
+        targetSet = true;
+        lcd.clear();
+        lcd.print("INIT LANDING");
+    }
+    lastLand = landBtn;
+
     static unsigned long lastLCD = 0;
     if (millis() - lastLCD > 300) {
         lcd.setCursor(0, 0);
         float hgt = currentAltitude - groundAltitude;
-        lcd.print("AGL: ");
+        lcd.print("H: ");
         lcd.print(hgt < 0 ? 0.0f : hgt, 1);
-        lcd.print("m  ");
+        lcd.print("m T: ");
+        lcd.print(targetAltitude - groundAltitude, 1);
 
         lcd.setCursor(0, 1);
         if (isLanding)
             lcd.print("MODE: LANDING  ");
-        else {
-            lcd.print(targetSet ? "Tgt: " : "Set: ");
-            lcd.print(targetSet ? targetAltitude : previewAlt, 1);
-            lcd.print("m  ");
-        }
+        else
+            lcd.print(targetSet ? "MODE: LOCKED   " : "MODE: IDLE     ");
         lastLCD = millis();
     }
 }
