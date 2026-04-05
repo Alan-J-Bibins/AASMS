@@ -72,10 +72,10 @@ void handleRoot()
     String json = "{";
     json += "\"temp_c\":" + String(currentTemp, 1) + ",";
     json += "\"pressure_hpa\":" + String(currentPressure, 1) + ",";
-    json += "\"alt_m\":" + String(currentAltitude, 2) + ",";
-    json += "\"alt_agl\":" + String(altAGL, 2) + ",";
-    json += "\"target_m\":" + String(targetAltitude, 2) + ",";
-    json += "\"burner_deg\":" + String(currentServoAngle) + ",";
+    json += "\"alt_baro\":" + String(currentAltitude, 2) + ",";
+    json += "\"alt_radar\":" + String(altAGL, 2) + ",";
+    json += "\"target_asl\":" + String(targetAltitude, 2) + ",";
+    json += "\"servo_deg\":" + String(currentServoAngle) + ",";
     json += "\"is_landing\":" + String(isLanding ? "true" : "false") + ",";
     json += "\"status\":\"" + statusStr + "\"";
     json += "}";
@@ -178,6 +178,9 @@ void setup()
     Serial.begin(115200);
     pinMode(confirmButtonPin, INPUT_PULLUP);
     pinMode(landButtonPin, INPUT_PULLUP);
+    pinMode(trigPin, OUTPUT);
+    pinMode(echoPin, INPUT);
+    pinMode(2, OUTPUT);
 
     // I2C Bus Init
     Wire.begin(21, 22);
@@ -231,7 +234,6 @@ void setup()
     server.on("/set", HTTP_OPTIONS, cors);
     server.on("/land", HTTP_OPTIONS, cors);
 
-    pinMode(2, OUTPUT);
     digitalWrite(2, HIGH);
     server.begin();
     xTaskCreatePinnedToCore(PIDLoop, "PIDTask", 4096, NULL, 1, &PIDTaskHandle, 1);
