@@ -227,7 +227,7 @@ void loop()
     // Logic for Button 1: Lock current altitude (Confirm)
     int addVal = analogRead(addPotPin);
     int subVal = analogRead(subPotPin);
-    float previewAlt = currentAltitude + map(addVal, 0, 4095, 0, 10) - map(subVal, 0, 4095, 0, 10);
+    float previewAlt = currentAltitude + map(addVal, 0, 4095, 0, 100) - map(subVal, 0, 4095, 0, 100);
 
     static int lastConfirm = HIGH;
     int confirmBtn = digitalRead(confirmButtonPin);
