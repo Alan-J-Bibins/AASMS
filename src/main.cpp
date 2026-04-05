@@ -23,6 +23,8 @@ const int confirmButtonPin = 14; // Button on D14
 const int landButtonPin = 13; // Button on D13
 const int addPotPin = 32; // Pins 21/22 now used for I2C
 const int subPotPin = 33;
+const int trigPin = 18;
+const int echoPin = 19;
 
 // I2C Instances (Pins 21/22)
 Adafruit_BMP280 bmp;
@@ -105,6 +107,21 @@ void handleLandCommand()
     targetSet = true;
     sendCORSJson(200, "{\"success\":true,\"message\":\"Landing sequence started\"}");
     Serial.println("WEB_CMD: Landing Initiated");
+}
+
+float readUltrasonic()
+{
+    digitalWrite(trigPin, LOW);
+    delayMicroseconds(2);
+    digitalWrite(trigPin, HIGH);
+    delayMicroseconds(10);
+    digitalWrite(trigPin, LOW);
+
+    // 25ms timeout (~4.2 meters max range)
+    long duration = pulseIn(echoPin, HIGH, 25000);
+    if (duration == 0)
+        return -1.0f; // Out of range
+    return (duration * 0.0343f) / 2.0f; // Returns meters
 }
 
 void PIDLoop(void* pvParameters)
@@ -228,6 +245,11 @@ void loop()
     int addVal = analogRead(addPotPin);
     int subVal = analogRead(subPotPin);
     float previewAlt = currentAltitude + map(addVal, 0, 4095, 0, 100) - map(subVal, 0, 4095, 0, 100);
+    float ultraVal = readUltrasonic();
+    Serial.println();
+    Serial.print("Ultrasonic value: ");
+    Serial.print(ultraVal);
+    Serial.println();
 
     static int lastConfirm = HIGH;
     int confirmBtn = digitalRead(confirmButtonPin);
