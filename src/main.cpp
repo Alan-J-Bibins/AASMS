@@ -22,9 +22,11 @@ const int servoPin = 27; // Data on D27
 const int confirmButtonPin = 14; // Button on D14
 const int landButtonPin = 13; // Button on D13
 const int addPotPin = 32; // Pins 21/22 now used for I2C
-const int subPotPin = 33;
+const int subPotPin = 35;
 const int trigPin = 18;
 const int echoPin = 19;
+const int obstacleLedPin = 26;
+const int landingLedPin = 33;
 
 // I2C Instances (Pins 21/22)
 Adafruit_BMP280 bmp;
@@ -33,6 +35,7 @@ Servo ventServo;
 
 // --- Global Flight State ---
 volatile float currentAltitude = 0;
+volatile float currentAltitudeAboveGround = 0;
 volatile float groundAltitude = 0;
 volatile float targetAltitude = -1;
 volatile bool targetSet = false;
@@ -56,13 +59,9 @@ void sendCORSJson(int code, String content)
 
 void handleRoot()
 {
-    float altAGL = currentAltitude - groundAltitude;
-    if (altAGL < 0)
-        altAGL = 0;
-
     String statusStr;
     if (isLanding) {
-        statusStr = (altAGL < GROUND_THRESHOLD) ? "LANDED" : "LANDING";
+        statusStr = (currentAltitudeAboveGround != -1 && currentAltitudeAboveGround < GROUND_THRESHOLD) ? "LANDED" : "LANDING";
     } else if (targetSet) {
         statusStr = "LOCKED";
     } else {
@@ -73,7 +72,7 @@ void handleRoot()
     json += "\"temp_c\":" + String(currentTemp, 1) + ",";
     json += "\"pressure_hpa\":" + String(currentPressure, 1) + ",";
     json += "\"alt_baro\":" + String(currentAltitude, 2) + ",";
-    json += "\"alt_radar\":" + String(altAGL, 2) + ",";
+    json += "\"alt_radar\":" + String(currentAltitudeAboveGround, 2) + ",";
     json += "\"target_asl\":" + String(targetAltitude, 2) + ",";
     json += "\"servo_deg\":" + String(currentServoAngle) + ",";
     json += "\"is_landing\":" + String(isLanding ? "true" : "false") + ",";
@@ -121,7 +120,7 @@ float readUltrasonic()
     long duration = pulseIn(echoPin, HIGH, 25000);
     if (duration == 0)
         return -1.0f; // Out of range
-    return (duration * 0.0343f) / 2.0f; // Returns meters
+    return (duration * 0.000343f) / 2.0f; // Returns meters
 }
 
 void PIDLoop(void* pvParameters)
@@ -134,19 +133,20 @@ void PIDLoop(void* pvParameters)
         unsigned long now = millis();
         float dt = (now - lastTime) / 1000.0f;
 
+        // 1. Refresh Sensors
+        currentAltitudeAboveGround = readUltrasonic();
         currentAltitude = bmp.readAltitude(1013.25);
         currentTemp = bmp.readTemperature();
         currentPressure = bmp.readPressure() / 100.0F;
 
+        // 2. Landing Logic: Lower Baro Target until Ultrasonic takes over
         if (isLanding) {
             if (lastDescendTick == 0)
                 lastDescendTick = now;
-
             if (now - lastDescendTick >= 1000) {
-                if (targetAltitude > (groundAltitude + 0.1f)) {
+                // If radar is out of range (> 4m), keep dropping the Baro target
+                if (currentAltitudeAboveGround < 0) {
                     targetAltitude -= DESCENT_RATE;
-                } else {
-                    targetAltitude = groundAltitude;
                 }
                 lastDescendTick = now;
             }
@@ -154,16 +154,42 @@ void PIDLoop(void* pvParameters)
             lastDescendTick = 0;
         }
 
+        // 3. PID Calculation
         if (targetSet && dt > 0) {
-            float error = targetAltitude - currentAltitude;
-            float pOut = Kp * error;
+            float error;
 
+            // --- MODE A: Precision Landing (Radar Active) ---
+            // If landing and we have a valid ground reading under 3.5 meters
+            if (isLanding && currentAltitudeAboveGround > 0 && currentAltitudeAboveGround < 3.5f) {
+                // Target is "0" (the ground). Error = Target - Current
+                error = 0.0f - currentAltitudeAboveGround;
+            }
+            // --- MODE B: Barometric Cruise / High Altitude Descent ---
+            else {
+                error = targetAltitude - currentAltitude;
+
+                // OBSTACLE AVOIDANCE: If cruising and something gets closer than 1.5m
+                if (!isLanding && currentAltitudeAboveGround > 0 && currentAltitudeAboveGround < 1.5f) {
+                    // We "add" to the error to force the PID to climb
+                    error += (1.5f - currentAltitudeAboveGround) * 2.0f;
+                }
+            }
+
+            // Standard PID Math (Matches your Kp, Ki, Kd)
+            float pOut = Kp * error;
             if (abs(error) < 10.0f)
                 integral += error * dt;
             float iOut = Ki * integral;
             float dOut = Kd * ((error - lastError) / dt);
 
+            // Final Servo Output
             currentServoAngle = constrain((int)(pOut + iOut + dOut), 0, 90);
+
+            // Touchdown Safety: If we are within 15cm of the ground, stop the motor
+            if (isLanding && currentAltitudeAboveGround > 0 && currentAltitudeAboveGround < 0.15f) {
+                currentServoAngle = 0;
+            }
+
             ventServo.write(currentServoAngle);
             lastError = error;
         }
@@ -180,10 +206,13 @@ void setup()
     pinMode(landButtonPin, INPUT_PULLUP);
     pinMode(trigPin, OUTPUT);
     pinMode(echoPin, INPUT);
+    pinMode(obstacleLedPin, OUTPUT);
+    pinMode(landingLedPin, OUTPUT);
     pinMode(2, OUTPUT);
 
     // I2C Bus Init
     Wire.begin(21, 22);
+    digitalWrite(2, HIGH);
 
     ESP32PWM::allocateTimer(0);
     ventServo.setPeriodHertz(50);
@@ -203,7 +232,6 @@ void setup()
 
     delay(2000);
     groundAltitude = bmp.readAltitude(1013.25);
-    targetAltitude = groundAltitude;
 
     WiFi.begin(wifi_ssid, wifi_password);
     while (WiFi.status() != WL_CONNECTED) {
@@ -234,7 +262,6 @@ void setup()
     server.on("/set", HTTP_OPTIONS, cors);
     server.on("/land", HTTP_OPTIONS, cors);
 
-    digitalWrite(2, HIGH);
     server.begin();
     xTaskCreatePinnedToCore(PIDLoop, "PIDTask", 4096, NULL, 1, &PIDTaskHandle, 1);
 }
@@ -243,16 +270,13 @@ void loop()
 {
     server.handleClient();
 
-    // Logic for Button 1: Lock current altitude (Confirm)
+    // 1. Altitude Preview Logic
     int addVal = analogRead(addPotPin);
     int subVal = analogRead(subPotPin);
-    float previewAlt = currentAltitude + map(addVal, 0, 4095, 0, 100) - map(subVal, 0, 4095, 0, 100);
-    float ultraVal = readUltrasonic();
-    Serial.println();
-    Serial.print("Ultrasonic value: ");
-    Serial.print(ultraVal);
-    Serial.println();
+    // Standardizing the map to 0-50m for finer control during demo
+    float previewAlt = currentAltitude + map(addVal, 0, 4095, 0, 50) - map(subVal, 0, 4095, 0, 50);
 
+    // 2. Button 1: Lock Target
     static int lastConfirm = HIGH;
     int confirmBtn = digitalRead(confirmButtonPin);
     if (confirmBtn == LOW && lastConfirm == HIGH) {
@@ -261,10 +285,11 @@ void loop()
         isLanding = false;
         lcd.clear();
         lcd.print("MANUAL LOCK");
+        delay(200); // Small debounce
     }
     lastConfirm = confirmBtn;
 
-    // Logic for Button 2: Land command
+    // 3. Button 2: Land Command
     static int lastLand = HIGH;
     int landBtn = digitalRead(landButtonPin);
     if (landBtn == LOW && lastLand == HIGH) {
@@ -272,24 +297,49 @@ void loop()
         targetSet = true;
         lcd.clear();
         lcd.print("INIT LANDING");
+        delay(200);
     }
     lastLand = landBtn;
 
+    // 4. LED Indicators
+    // Obstacle LED (D26)
+    digitalWrite(obstacleLedPin, (currentAltitudeAboveGround > 0 && currentAltitudeAboveGround < 1.5f) ? HIGH : LOW);
+
+    // Landing LED (D33)
+    digitalWrite(landingLedPin, (isLanding && currentAltitudeAboveGround > 0 && currentAltitudeAboveGround < 0.2f) ? HIGH : LOW);
+
+    // 5. Wind Gust Detection
+    static float lastPressure = 0;
+    static unsigned long lastWindCheck = 0;
+    bool windWarningActive = false;
+
+    if (millis() - lastWindCheck > 100) {
+        float pressureDiff = abs(currentPressure - lastPressure);
+        if (pressureDiff > 0.5f && lastPressure != 0) {
+            windWarningActive = true;
+        }
+        lastPressure = currentPressure;
+        lastWindCheck = millis();
+    }
+
+    // 6. LCD Update (Every 300ms)
     static unsigned long lastLCD = 0;
     if (millis() - lastLCD > 300) {
         lcd.setCursor(0, 0);
         float hgt = currentAltitude - groundAltitude;
         lcd.print("AGL: ");
         lcd.print(hgt < 0 ? 0.0f : hgt, 1);
-        lcd.print("m  ");
+        lcd.print("m    "); // Spaces to clear old digits
 
         lcd.setCursor(0, 1);
-        if (isLanding)
-            lcd.print("MODE: LANDING  ");
-        else {
+        if (windWarningActive) {
+            lcd.print("!! WIND GUST !! ");
+        } else if (isLanding) {
+            lcd.print(currentAltitudeAboveGround < 0.2f ? "MODE: LANDED    " : "MODE: LANDING   ");
+        } else {
             lcd.print(targetSet ? "Tgt: " : "Set: ");
             lcd.print(targetSet ? targetAltitude : previewAlt, 1);
-            lcd.print("m  ");
+            lcd.print("m    ");
         }
         lastLCD = millis();
     }
