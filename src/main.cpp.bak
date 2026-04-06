@@ -1,0 +1,61 @@
+#include <Arduino.h>
+#include <LiquidCrystal_I2C.h>
+#include <Wire.h>
+
+// Set the LCD address to 0x27 for a 16 chars and 2 line display
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+
+const int statusLed = 2; // Internal Blue LED
+
+void setup()
+{
+    Serial.begin(115200);
+    pinMode(statusLed, OUTPUT);
+
+    // STEP 1: Power Stabilization Delay
+    // High-current 5V supplies sometimes "bounce" on startup.
+    // We wait 2 seconds before touching the I2C hardware.
+    digitalWrite(statusLed, LOW);
+    delay(2000);
+
+    // STEP 2: Start I2C
+    Serial.println("Starting I2C...");
+    Wire.begin(21, 22);
+
+    // If the blue light turns on here, Wire.begin passed!
+    digitalWrite(statusLed, HIGH);
+    Serial.println("I2C initialized successfully.");
+
+    // STEP 3: Initialize LCD
+    lcd.init();
+    lcd.backlight();
+
+    lcd.setCursor(0, 0);
+    lcd.print("ESP32 Powered!");
+    lcd.setCursor(0, 1);
+    lcd.print("External 5V: OK");
+
+    delay(2000);
+    lcd.clear();
+}
+
+void loop()
+{
+    static int counter = 0;
+
+    // Flash the blue LED to show the CPU isn't frozen
+    digitalWrite(statusLed, HIGH);
+
+    lcd.setCursor(0, 0);
+    lcd.print("System Running");
+
+    lcd.setCursor(0, 1);
+    lcd.print("Counter: ");
+    lcd.print(counter);
+
+    delay(500);
+    digitalWrite(statusLed, LOW);
+    delay(500);
+
+    counter++;
+}

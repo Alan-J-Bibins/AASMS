@@ -12,28 +12,24 @@
 #include <esp32-hal-adc.h>
 #include <esp32-hal-gpio.h>
 
-// --- Configuration ---
 const char* wifi_ssid = "Honor10Lite";
 const char* wifi_password = "AJBfifa2k20";
 WebServer server(80);
 
-// NEW PINS APPLIED
-const int servoPin = 27; // Data on D27
-const int confirmButtonPin = 14; // Button on D14
-const int landButtonPin = 13; // Button on D13
-const int addPotPin = 32; // Pins 21/22 now used for I2C
+const int servoPin = 27;
+const int confirmButtonPin = 14;
+const int landButtonPin = 13;
+const int addPotPin = 32;
 const int subPotPin = 35;
 const int trigPin = 18;
 const int echoPin = 19;
 const int obstacleLedPin = 26;
 const int landingLedPin = 33;
 
-// I2C Instances (Pins 21/22)
 Adafruit_BMP280 bmp;
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 Servo ventServo;
 
-// --- Global Flight State ---
 volatile float currentAltitude = 0;
 volatile float currentAltitudeAboveGround = 0;
 volatile float groundAltitude = 0;
@@ -44,7 +40,6 @@ volatile int currentServoAngle = 0;
 volatile float currentTemp = 0;
 volatile float currentPressure = 0;
 
-// PID & Physics Constants (Kept exactly as original)
 float Kp = 1.2, Ki = 0.01, Kd = 0.5;
 const float DESCENT_RATE = 0.4f;
 const float GROUND_THRESHOLD = 2.0f;
@@ -116,11 +111,10 @@ float readUltrasonic()
     delayMicroseconds(10);
     digitalWrite(trigPin, LOW);
 
-    // 25ms timeout (~4.2 meters max range)
     long duration = pulseIn(echoPin, HIGH, 25000);
     if (duration == 0)
-        return -1.0f; // Out of range
-    return (duration * 0.000343f) / 2.0f; // Returns meters
+        return -1.0f;
+    return (duration * 0.000343f) / 2.0f;
 }
 
 void PIDLoop(void* pvParameters)
@@ -133,18 +127,16 @@ void PIDLoop(void* pvParameters)
         unsigned long now = millis();
         float dt = (now - lastTime) / 1000.0f;
 
-        // 1. Refresh Sensors
         currentAltitudeAboveGround = readUltrasonic();
         currentAltitude = bmp.readAltitude(1013.25);
         currentTemp = bmp.readTemperature();
         currentPressure = bmp.readPressure() / 100.0F;
 
-        // 2. Landing Logic: Lower Baro Target until Ultrasonic takes over
         if (isLanding) {
             if (lastDescendTick == 0)
                 lastDescendTick = now;
             if (now - lastDescendTick >= 1000) {
-                // If radar is out of range (> 4m), keep dropping the Baro target
+
                 if (currentAltitudeAboveGround < 0) {
                     targetAltitude -= DESCENT_RATE;
                 }
@@ -154,38 +146,31 @@ void PIDLoop(void* pvParameters)
             lastDescendTick = 0;
         }
 
-        // 3. PID Calculation
         if (targetSet && dt > 0) {
             float error;
 
-            // --- MODE A: Precision Landing (Radar Active) ---
-            // If landing and we have a valid ground reading under 3.5 meters
             if (isLanding && currentAltitudeAboveGround > 0 && currentAltitudeAboveGround < 3.5f) {
-                // Target is "0" (the ground). Error = Target - Current
+
                 error = 0.0f - currentAltitudeAboveGround;
             }
-            // --- MODE B: Barometric Cruise / High Altitude Descent ---
+
             else {
                 error = targetAltitude - currentAltitude;
 
-                // OBSTACLE AVOIDANCE: If cruising and something gets closer than 1.5m
                 if (!isLanding && currentAltitudeAboveGround > 0 && currentAltitudeAboveGround < 1.5f) {
-                    // We "add" to the error to force the PID to climb
+
                     error += (1.5f - currentAltitudeAboveGround) * 2.0f;
                 }
             }
 
-            // Standard PID Math (Matches your Kp, Ki, Kd)
             float pOut = Kp * error;
             if (abs(error) < 10.0f)
                 integral += error * dt;
             float iOut = Ki * integral;
             float dOut = Kd * ((error - lastError) / dt);
 
-            // Final Servo Output
             currentServoAngle = constrain((int)(pOut + iOut + dOut), 0, 90);
 
-            // Touchdown Safety: If we are within 15cm of the ground, stop the motor
             if (isLanding && currentAltitudeAboveGround > 0 && currentAltitudeAboveGround < 0.15f) {
                 currentServoAngle = 0;
             }
@@ -202,47 +187,58 @@ void PIDLoop(void* pvParameters)
 void setup()
 {
     Serial.begin(115200);
+
+    pinMode(2, OUTPUT);
+    digitalWrite(2, LOW);
     pinMode(confirmButtonPin, INPUT_PULLUP);
     pinMode(landButtonPin, INPUT_PULLUP);
     pinMode(trigPin, OUTPUT);
     pinMode(echoPin, INPUT);
     pinMode(obstacleLedPin, OUTPUT);
     pinMode(landingLedPin, OUTPUT);
-    pinMode(2, OUTPUT);
 
-    // I2C Bus Init
+    delay(2000);
+
     Wire.begin(21, 22);
-    digitalWrite(2, HIGH);
-
-    ESP32PWM::allocateTimer(0);
-    ventServo.setPeriodHertz(50);
-    ventServo.attach(servoPin, 500, 2400);
-    ventServo.write(0);
-
-    // I2C LCD Init
     lcd.init();
     lcd.backlight();
+    lcd.clear();
+    lcd.print("BOOT: I2C OK");
+    delay(500);
 
-    // I2C BMP280 Init
     if (!bmp.begin(0x76)) {
         Serial.println("BMP280 Fail");
+        lcd.setCursor(0, 1);
+        lcd.print("BMP280 ERROR!");
         while (1)
             ;
     }
-
-    delay(2000);
     groundAltitude = bmp.readAltitude(1013.25);
+    lcd.setCursor(0, 1);
+    lcd.print("BARO: CALIBRATED");
+    delay(1000);
 
-    WiFi.begin(wifi_ssid, wifi_password);
-    while (WiFi.status() != WL_CONNECTED) {
-        delay(500);
-        Serial.print(".");
+    lcd.clear();
+    lcd.print("WIFI: STARTING AP");
+
+    WiFi.setTxPower(WIFI_POWER_11dBm);
+
+    if (WiFi.softAP("Balloon-Control", "password123")) {
+        digitalWrite(2, HIGH);
+        IPAddress myIP = WiFi.softAPIP();
+
+        lcd.clear();
+        lcd.print("AP: ACTIVE");
+        lcd.setCursor(0, 1);
+        lcd.print(myIP.toString());
+        Serial.print("AP IP address: ");
+        Serial.println(myIP);
+    } else {
+        lcd.clear();
+        lcd.print("AP: FAILED");
     }
 
-    IPAddress ip = WiFi.localIP();
-    Serial.println("");
-    Serial.print("WiFi Connected. IP: ");
-    Serial.println(ip);
+    delay(1500);
 
     if (MDNS.begin("balloon")) {
         MDNS.addService("http", "tcp", 80);
@@ -261,8 +257,17 @@ void setup()
     server.on("/", HTTP_OPTIONS, cors);
     server.on("/set", HTTP_OPTIONS, cors);
     server.on("/land", HTTP_OPTIONS, cors);
-
     server.begin();
+
+    ESP32PWM::allocateTimer(0);
+    ventServo.setPeriodHertz(50);
+    ventServo.attach(servoPin, 500, 2400);
+    ventServo.write(0);
+
+    lcd.clear();
+    lcd.print("SYSTEM READY");
+    delay(1000);
+
     xTaskCreatePinnedToCore(PIDLoop, "PIDTask", 4096, NULL, 1, &PIDTaskHandle, 1);
 }
 
@@ -270,13 +275,11 @@ void loop()
 {
     server.handleClient();
 
-    // 1. Altitude Preview Logic
     int addVal = analogRead(addPotPin);
     int subVal = analogRead(subPotPin);
-    // Standardizing the map to 0-50m for finer control during demo
+
     float previewAlt = currentAltitude + map(addVal, 0, 4095, 0, 50) - map(subVal, 0, 4095, 0, 50);
 
-    // 2. Button 1: Lock Target
     static int lastConfirm = HIGH;
     int confirmBtn = digitalRead(confirmButtonPin);
     if (confirmBtn == LOW && lastConfirm == HIGH) {
@@ -285,11 +288,10 @@ void loop()
         isLanding = false;
         lcd.clear();
         lcd.print("MANUAL LOCK");
-        delay(200); // Small debounce
+        delay(200);
     }
     lastConfirm = confirmBtn;
 
-    // 3. Button 2: Land Command
     static int lastLand = HIGH;
     int landBtn = digitalRead(landButtonPin);
     if (landBtn == LOW && lastLand == HIGH) {
@@ -301,14 +303,10 @@ void loop()
     }
     lastLand = landBtn;
 
-    // 4. LED Indicators
-    // Obstacle LED (D26)
     digitalWrite(obstacleLedPin, (currentAltitudeAboveGround > 0 && currentAltitudeAboveGround < 1.5f) ? HIGH : LOW);
 
-    // Landing LED (D33)
     digitalWrite(landingLedPin, (isLanding && currentAltitudeAboveGround > 0 && currentAltitudeAboveGround < 0.2f) ? HIGH : LOW);
 
-    // 5. Wind Gust Detection
     static float lastPressure = 0;
     static unsigned long lastWindCheck = 0;
     bool windWarningActive = false;
@@ -322,14 +320,13 @@ void loop()
         lastWindCheck = millis();
     }
 
-    // 6. LCD Update (Every 300ms)
     static unsigned long lastLCD = 0;
     if (millis() - lastLCD > 300) {
         lcd.setCursor(0, 0);
         float hgt = currentAltitude - groundAltitude;
         lcd.print("AGL: ");
-        lcd.print(hgt < 0 ? 0.0f : hgt, 1);
-        lcd.print("m    "); // Spaces to clear old digits
+        lcd.print(currentAltitudeAboveGround < 0 ? "INF" : String(currentAltitudeAboveGround, 1));
+        lcd.print("m    ");
 
         lcd.setCursor(0, 1);
         if (windWarningActive) {
